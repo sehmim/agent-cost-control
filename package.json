@@ -1,0 +1,46 @@
+{
+  "name": "agenthelm",
+  "version": "0.1.0",
+  "description": "Wrap your OpenAI client to track token usage and cost. Never touches keys, prompts, or completions.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "openai",
+    "finops",
+    "tokens",
+    "cost",
+    "telemetry",
+    "observability"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "openai": ">=4"
+  },
+  "devDependencies": {
+    "openai": "^4.77.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
