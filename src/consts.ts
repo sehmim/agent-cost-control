@@ -38,3 +38,10 @@ export const PRICING: Record<string, ModelRate> = {
   "claude-opus-4": rate(15, 75),
   "claude-haiku-3-5": rate(0.8, 4),
 };
+
+/**
+ * Cost used when a model isn't in PRICING. Deliberately HIGH (≈ the priciest known
+ * model) so an unknown/new model is never under-billed to $0 — budgets must still
+ * trip for models we haven't priced yet. Add the real row to PRICING for accuracy.
+ */
+export const FALLBACK_RATE: ModelRate = rate(30, 60);

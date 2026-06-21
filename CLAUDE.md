@@ -31,7 +31,7 @@ const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 
 `src/telemetry.ts` (`TelemetryQueue`) buffers events, flushes on `batchSize` or a `setInterval` (`unref`'d so it never holds the process open), and POSTs `{ events }` with a Bearer header via native `fetch`. All dispatch errors route to `onError` — never thrown into the caller's path. `monitor.ts` registers a one-time `beforeExit` flush.
 
-`src/pricing.ts` is just `calculateCost` over the `PRICING` table from consts; unknown model → `0` + warning, never throws.
+`src/pricing.ts` is `calculateCost` over the `PRICING` table from consts. An unknown model falls back to a deliberately high conservative rate (`FALLBACK_RATE`, ≈ gpt-4) and warns via `onError` — **never `0`**, so budgets still trip for un-priced/new models. Never throws.
 
 `src/fingerprint.ts` (`fingerprintMessages`) turns the request `messages` into a `PromptFingerprint`: message count, per-role count/char breakdown, total chars, and a SHA-256 hash of the message array. **No raw prompt content** — the hash is one-way (catches repeated/looping prompts), sizes catch bloat/fat system prompts. Always attached to the event when `messages` is an array.
 
