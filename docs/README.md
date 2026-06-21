@@ -1,4 +1,4 @@
-# Agent Tracker SDK — Docs
+# Agent Cost Controller SDK — Docs
 
 Start here if the codebase feels opaque.
 

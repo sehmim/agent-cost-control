@@ -1,4 +1,4 @@
-# Using the Agent Tracker SDK in another project
+# Using the Agent Cost Controller SDK in another project
 
 The SDK isn't published to npm yet, so you consume it locally. Once your backend
 is running (see `frontend/SUPABASE_SETUP.md`), point the SDK at it.
@@ -11,14 +11,14 @@ From this `sdk/` directory:
 cd sdk
 npm install
 npm run build      # produces dist/
-npm link           # registers "agenthelm" globally on your machine
+npm link           # registers "agent-cost-controller" globally on your machine
 ```
 
 In the project that runs your agents:
 
 ```bash
 cd ../your-agent-project
-npm link agenthelm
+npm link agent-cost-controller
 npm install openai   # peer dependency — bring your own version
 ```
 
@@ -28,7 +28,7 @@ npm install openai   # peer dependency — bring your own version
 ## 2. Wrap your client
 
 ```ts
-import { monitor, AgentKilledError } from "agenthelm";
+import { monitor, AgentKilledError } from "agent-cost-controller";
 import OpenAI from "openai";
 
 const client = monitor(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
@@ -136,5 +136,5 @@ Either way, no LLM call is made and no spend occurs.
 | 401 from ingest | `helmKey` doesn't match a row in `api_keys` |
 | Kill button doesn't stop the agent | no budget/auto-stop set, or `killCheck: false` was passed |
 | A killed subagent crashes the whole run | add an `onKilled` handler so it returns a fallback instead of throwing |
-| `Cannot find module 'agenthelm'` | re-run `npm link agenthelm`; ensure `npm run build` ran |
+| `Cannot find module 'agent-cost-controller'` | re-run `npm link agent-cost-controller`; ensure `npm run build` ran |
 | Redirected to /login when posting | backend older than this fix — `/v1/*` must be excluded from auth middleware |

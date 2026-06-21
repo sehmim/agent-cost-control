@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agenthelm` — a lightweight Node/TypeScript SDK that wraps an existing OpenAI client to extract token-usage metadata from responses and ship it asynchronously to a telemetry endpoint. It never touches API keys, prompt content, or completion content — only the `usage` object.
+`agent-cost-controller` — a lightweight Node/TypeScript SDK that wraps an existing OpenAI client to extract token-usage metadata from responses and ship it asynchronously to a telemetry endpoint. It never touches API keys, prompt content, or completion content — only the `usage` object.
 
 ```typescript
-import { monitor } from "agenthelm";
+import { monitor } from "agent-cost-controller";
 import OpenAI from "openai";
 
 const client = monitor(new OpenAI({ apiKey }), { agentId: "support-bot", helmKey: "ahk_..." });

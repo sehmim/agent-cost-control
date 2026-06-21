@@ -15,7 +15,7 @@ export function calculateCost(
   const rate = PRICING[model];
   if (!rate) {
     const err = new Error(
-      `agenthelm: no pricing for model "${model}" — using conservative fallback rate so budgets still apply. Add it to PRICING for accuracy.`,
+      `agent-cost-controller: no pricing for model "${model}" — using conservative fallback rate so budgets still apply. Add it to PRICING for accuracy.`,
     );
     if (onError) onError(err);
     else console.warn(err.message);

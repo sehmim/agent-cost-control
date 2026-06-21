@@ -1,11 +1,11 @@
-# Agent Tracker
+# Agent Cost Controller
 
 Wrap your OpenAI client to track token usage and cost. One line, zero SDK rewrites. Never touches your API keys, prompts, or completions — only the `usage` object.
 
 ## Install
 
 ```bash
-npm install agenthelm openai
+npm install agent-cost-controller openai
 ```
 
 Requires Node 18+. `openai` is a peer dependency — bring your own version.
@@ -13,7 +13,7 @@ Requires Node 18+. `openai` is a peer dependency — bring your own version.
 ## Usage
 
 ```typescript
-import { monitor } from "agenthelm";
+import { monitor } from "agent-cost-controller";
 import OpenAI from "openai";
 
 const client = monitor(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
@@ -28,7 +28,7 @@ const res = await client.chat.completions.create({
 });
 ```
 
-Streaming works too — `agenthelm` auto-requests usage stats and reads them off the final chunk:
+Streaming works too — `agent-cost-controller` auto-requests usage stats and reads them off the final chunk:
 
 ```typescript
 const stream = await client.chat.completions.create({
@@ -61,7 +61,7 @@ of hitting the LLM. Status is cached briefly and **fails open** — a status-end
 never blocks your calls.
 
 ```ts
-import { monitor, AgentKilledError } from "agenthelm";
+import { monitor, AgentKilledError } from "agent-cost-controller";
 
 const client = monitor(new OpenAI(), { agentId: "support-bot", helmKey: "ahk_…", killCheck: true });
 

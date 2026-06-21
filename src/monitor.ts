@@ -79,11 +79,11 @@ let exitHookInstalled = false;
  */
 export function monitor<T extends object>(client: T, options: MonitorOptions): T {
   if (!options?.agentId || !options?.helmKey) {
-    throw new Error("agenthelm: monitor() requires both `agentId` and `helmKey`.");
+    throw new Error("agent-cost-controller: monitor() requires both `agentId` and `helmKey`.");
   }
   if (!isOpenAIClient(client)) {
     throw new Error(
-      "agenthelm: unsupported client. monitor() currently supports the OpenAI client (one exposing chat.completions.create).",
+      "agent-cost-controller: unsupported client. monitor() currently supports the OpenAI client (one exposing chat.completions.create).",
     );
   }
 

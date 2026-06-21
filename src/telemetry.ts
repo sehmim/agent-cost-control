@@ -36,7 +36,7 @@ export class TelemetryQueue {
         body: JSON.stringify({ events }),
       });
       if (!res.ok) {
-        this.opts.onError(new Error(`agenthelm: telemetry POST failed with ${res.status}`));
+        this.opts.onError(new Error(`agent-cost-controller: telemetry POST failed with ${res.status}`));
       }
     } catch (err) {
       this.opts.onError(err instanceof Error ? err : new Error(String(err)));

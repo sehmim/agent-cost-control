@@ -4,7 +4,7 @@ import type { ResolvedOptions } from "./types.js";
 /** Thrown by a monitored call when the agent has been killed from the dashboard. */
 export class AgentKilledError extends Error {
   constructor(public readonly agentId: string) {
-    super(`agenthelm: agent "${agentId}" is killed — request blocked.`);
+    super(`agent-cost-controller: agent "${agentId}" is killed — request blocked.`);
     this.name = "AgentKilledError";
   }
 }

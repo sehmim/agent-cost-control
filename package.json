@@ -1,5 +1,5 @@
 {
-  "name": "agenthelm",
+  "name": "agent-cost-controller",
   "version": "0.1.0",
   "description": "Wrap your OpenAI client to track token usage and cost. Never touches keys, prompts, or completions.",
   "type": "module",
