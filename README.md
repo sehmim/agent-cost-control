@@ -1,4 +1,4 @@
-# AgentHelm
+# Agent Tracker
 
 Wrap your OpenAI client to track token usage and cost. One line, zero SDK rewrites. Never touches your API keys, prompts, or completions — only the `usage` object.
 

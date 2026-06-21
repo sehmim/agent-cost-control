@@ -3,7 +3,7 @@ import { AgentKilledError, monitor } from "../src/index.js";
 
 /**
  * These mirror the flawed agents in /agent-testing-playground, adapted to the
- * real AgentHelm API (monitor + fingerprint + kill + telemetry). Each test
+ * real Agent Tracker API (monitor + fingerprint + kill + telemetry). Each test
  * asserts the SDK surfaces or stops the waste the corresponding agent creates.
  */
 

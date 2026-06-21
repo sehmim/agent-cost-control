@@ -26,6 +26,10 @@ export interface TelemetryEvent {
   stream: boolean;
   /** Prompt shape/hash for diagnosing waste. Absent when messages aren't an array. */
   prompt?: PromptFingerprint;
+  /** Names of tools the model called on this response. Names only — never arguments. Absent when none. */
+  tool_calls?: string[];
+  /** One-way hash of the output (completion / tool-call JSON). Content-free; detects a stuck model. Absent when no output. */
+  output_hash?: string;
 }
 
 export interface MonitorOptions {

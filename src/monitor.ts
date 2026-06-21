@@ -5,7 +5,7 @@ import {
   SDK_VERSION,
 } from "./consts.js";
 import { calculateCost } from "./pricing.js";
-import { fingerprintMessages } from "./fingerprint.js";
+import { fingerprintMessages, hashOutput } from "./fingerprint.js";
 import { AgentKilledError, KillSwitch } from "./kill.js";
 import { TelemetryQueue } from "./telemetry.js";
 import type {
@@ -21,8 +21,51 @@ interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
 }
+/** A tool call: name is reported; arguments are only ever fed into a one-way hash. */
+interface ToolCall {
+  function?: { name?: string; arguments?: string } | null;
+}
+interface OutputPart {
+  content?: string | null;
+  tool_calls?: ToolCall[] | null;
+}
+interface Choice {
+  message?: OutputPart | null;
+  delta?: OutputPart | null;
+}
+interface Response {
+  usage?: Usage | null;
+  choices?: Choice[] | null;
+}
 interface Chunk {
   usage?: Usage | null;
+  choices?: Choice[] | null;
+}
+
+/** Pull the names of tools the model asked to call. Names only — never arguments. */
+function toolNames(choices: Choice[] | null | undefined, pick: (c: Choice) => ToolCall[] | null | undefined): string[] {
+  const names: string[] = [];
+  for (const choice of choices ?? []) {
+    for (const call of pick(choice) ?? []) {
+      const name = call?.function?.name;
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+/** Output text + tool-call JSON to feed the output hash. Used to hash, never transmitted raw. */
+function outputParts(choices: Choice[] | null | undefined, pick: (c: Choice) => OutputPart | null | undefined): string[] {
+  const parts: string[] = [];
+  for (const choice of choices ?? []) {
+    const out = pick(choice);
+    if (typeof out?.content === "string") parts.push(out.content);
+    for (const call of out?.tool_calls ?? []) {
+      const args = call?.function?.arguments;
+      if (typeof args === "string") parts.push(args);
+    }
+  }
+  return parts;
 }
 
 // Queues kept alive so we can flush them all once on process exit.
@@ -156,12 +199,13 @@ function blocked(ctx: TraceContext): unknown {
   throw new AgentKilledError(ctx.opts.agentId);
 }
 
-/** Non-streaming: usage is on the resolved response. */
+/** Non-streaming: usage, tool calls, and output are on the resolved response. */
 async function runOnce(create: (...a: unknown[]) => unknown, args: unknown[], ctx: TraceContext) {
   if (await isBlocked(ctx)) return blocked(ctx);
-  const res = await create(...args);
-  const usage = (res as { usage?: Usage | null })?.usage;
-  emit(ctx, false, usage?.prompt_tokens ?? 0, usage?.completion_tokens ?? 0);
+  const res = (await create(...args)) as Response;
+  const tools = toolNames(res?.choices, (c) => c.message?.tool_calls);
+  const outHash = hashOutput(outputParts(res?.choices, (c) => c.message));
+  emit(ctx, false, res?.usage?.prompt_tokens ?? 0, res?.usage?.completion_tokens ?? 0, tools, outHash);
   return res;
 }
 
@@ -189,20 +233,26 @@ async function* emptyStream(): AsyncGenerator<Chunk> {
   // intentionally empty: no call made, no chunks to yield.
 }
 
-/** Re-yield every chunk untouched; capture usage off whichever chunk carries it. */
+/** Re-yield every chunk untouched; capture usage, tool names, and output as they stream by. */
 async function* passthrough(stream: AsyncIterable<Chunk>, ctx: TraceContext) {
   let input = 0;
   let output = 0;
+  const tools: string[] = [];
+  const out: string[] = [];
   try {
     for await (const chunk of stream) {
       if (chunk?.usage) {
         input = chunk.usage.prompt_tokens ?? input;
         output = chunk.usage.completion_tokens ?? output;
       }
+      // Tool-call names arrive on the opening delta of each call.
+      tools.push(...toolNames(chunk?.choices, (c) => c.delta?.tool_calls));
+      // Output text + tool-arg fragments accumulate across deltas (hashed at the end).
+      out.push(...outputParts(chunk?.choices, (c) => c.delta));
       yield chunk;
     }
   } finally {
-    emit(ctx, true, input, output);
+    emit(ctx, true, input, output, tools, hashOutput(out));
   }
 }
 
@@ -216,7 +266,14 @@ interface TraceContext {
 }
 
 /** Build a telemetry event from a finished call and queue it. */
-function emit(ctx: TraceContext, stream: boolean, input: number, output: number): void {
+function emit(
+  ctx: TraceContext,
+  stream: boolean,
+  input: number,
+  output: number,
+  tools: string[],
+  outputHash: string | undefined,
+): void {
   const event: TelemetryEvent = {
     agent_id: ctx.opts.agentId,
     model: ctx.model,
@@ -228,6 +285,8 @@ function emit(ctx: TraceContext, stream: boolean, input: number, output: number)
     sdk_version: SDK_VERSION,
     stream,
     ...(ctx.prompt ? { prompt: ctx.prompt } : {}),
+    ...(tools.length ? { tool_calls: tools } : {}),
+    ...(outputHash ? { output_hash: outputHash } : {}),
   };
   ctx.queue.push(event);
 }

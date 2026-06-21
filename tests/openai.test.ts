@@ -57,6 +57,68 @@ describe("wrapOpenAI", () => {
     expect(JSON.stringify(body.events[0])).not.toContain("You are helpful.");
   });
 
+  it("records tool-call names (without arguments) from the response", async () => {
+    const response = {
+      id: "cmpl_2",
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+      choices: [
+        {
+          message: {
+            tool_calls: [
+              { function: { name: "get_weather", arguments: '{"city":"Tokyo"}' } },
+              { function: { name: "calculate", arguments: '{"expr":"2+2"}' } },
+            ],
+          },
+        },
+      ],
+    };
+    const client = fakeOpenAI(async () => response);
+    const wrapped = monitor(client as any, baseOpts);
+
+    await wrapped.chat.completions.create({ model: "gpt-4o", messages: [], tools: [] });
+
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.events[0].tool_calls).toEqual(["get_weather", "calculate"]);
+    // arguments must never be transmitted
+    expect(JSON.stringify(body.events[0])).not.toContain("Tokyo");
+  });
+
+  it("attaches a one-way output hash without transmitting the completion text", async () => {
+    const response = {
+      id: "cmpl_3",
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+      choices: [{ message: { content: "{ \"name\": \"Ada\" SECRET_OUTPUT }" } }],
+    };
+    const client = fakeOpenAI(async () => response);
+    const wrapped = monitor(client as any, baseOpts);
+
+    await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
+
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(typeof body.events[0].output_hash).toBe("string");
+    expect(body.events[0].output_hash).toHaveLength(64); // sha-256 hex
+    expect(JSON.stringify(body.events[0])).not.toContain("SECRET_OUTPUT");
+  });
+
+  it("hashes identical outputs to the same value (stuck-model detection)", async () => {
+    const make = () =>
+      fakeOpenAI(async () => ({
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+        choices: [{ message: { content: "missing comma here" } }],
+      }));
+    const hashes: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+      const wrapped = monitor(make() as any, baseOpts);
+      await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      hashes.push(JSON.parse((fetch as any).mock.calls[0][1].body).events[0].output_hash);
+    }
+    expect(hashes[0]).toBe(hashes[1]);
+  });
+
   it("passes non-intercepted properties through untouched", () => {
     const client = fakeOpenAI(async () => ({}));
     const wrapped = monitor(client as any, baseOpts);

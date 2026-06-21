@@ -37,7 +37,7 @@ const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 
 ## Key Rules
 
-1. **Never** transmit raw prompt content, completions, or API keys. The `usage` object and a content-free `PromptFingerprint` (sizes + one-way hash) are the only data that leave the client.
+1. **Never** transmit raw prompt content, completions, or API keys. What leaves the client: the `usage` object, a content-free `PromptFingerprint` (sizes + one-way hash), tool-call **names** (never arguments), and a one-way `output_hash` of the completion (identical outputs collide, the text is not recoverable).
 2. **Never** add latency to the LLM call — all telemetry is post-response and async.
 3. Wrapped client must keep **identical return types** — don't break the OpenAI type signature.
 4. `openai` is a **peer dependency** — never bundle it; the user brings their own version.

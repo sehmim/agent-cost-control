@@ -1,4 +1,4 @@
-# Using the AgentHelm SDK in another project
+# Using the Agent Tracker SDK in another project
 
 The SDK isn't published to npm yet, so you consume it locally. Once your backend
 is running (see `frontend/SUPABASE_SETUP.md`), point the SDK at it.

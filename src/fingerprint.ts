@@ -48,3 +48,15 @@ export function fingerprintMessages(messages: unknown): PromptFingerprint | unde
     hash,
   };
 }
+
+/**
+ * One-way hash of an LLM's output (completion text and/or tool-call JSON). Like
+ * the prompt hash, it carries NO recoverable content — identical outputs collide,
+ * which is enough to spot a model stuck emitting the same (often malformed) answer.
+ * Returns undefined when there's no output to hash.
+ */
+export function hashOutput(parts: string[]): string | undefined {
+  const joined = parts.filter((p) => p && p.length > 0).join(" ");
+  if (!joined) return undefined;
+  return createHash("sha256").update(joined).digest("hex");
+}
