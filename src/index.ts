@@ -1,4 +1,4 @@
-export { monitor } from "./monitor.js";
+export { withCostControl } from "./monitor.js";
 export { calculateCost } from "./pricing.js";
 export { fingerprintMessages } from "./fingerprint.js";
 export { AgentKilledError } from "./kill.js";

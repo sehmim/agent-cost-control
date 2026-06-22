@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { monitor } from "../src/index.js";
+import { withCostControl } from "../src/index.js";
 
-/** Minimal stand-in for the OpenAI client shape monitor() detects and intercepts. */
+/** Minimal stand-in for the OpenAI client shape withCostControl() detects and intercepts. */
 function fakeOpenAI(createImpl: (params: any) => any) {
   const create = vi.fn(createImpl);
   return {
@@ -13,7 +13,7 @@ function fakeOpenAI(createImpl: (params: any) => any) {
 }
 
 // killCheck off here: these tests assert telemetry/passthrough, not kill behavior.
-const baseOpts = { agentId: "a1", helmKey: "ahk_test", batchSize: 1, killCheck: false };
+const baseOpts = { agentId: "a1", accKey: "acc_test", batchSize: 1, killCheck: false };
 
 describe("wrapOpenAI", () => {
   beforeEach(() => {
@@ -27,7 +27,7 @@ describe("wrapOpenAI", () => {
       usage: { prompt_tokens: 100, completion_tokens: 50 },
     };
     const client = fakeOpenAI(async () => response);
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
 
     const res = await wrapped.chat.completions.create({
       model: "gpt-4o",
@@ -73,7 +73,7 @@ describe("wrapOpenAI", () => {
       ],
     };
     const client = fakeOpenAI(async () => response);
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
 
     await wrapped.chat.completions.create({ model: "gpt-4o", messages: [], tools: [] });
 
@@ -91,7 +91,7 @@ describe("wrapOpenAI", () => {
       choices: [{ message: { content: "{ \"name\": \"Ada\" SECRET_OUTPUT }" } }],
     };
     const client = fakeOpenAI(async () => response);
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
 
     await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
 
@@ -111,7 +111,7 @@ describe("wrapOpenAI", () => {
     const hashes: string[] = [];
     for (let i = 0; i < 2; i++) {
       vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
-      const wrapped = monitor(make() as any, baseOpts);
+      const wrapped = withCostControl(make() as any, baseOpts);
       await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
       hashes.push(JSON.parse((fetch as any).mock.calls[0][1].body).events[0].output_hash);
@@ -121,7 +121,7 @@ describe("wrapOpenAI", () => {
 
   it("passes non-intercepted properties through untouched", () => {
     const client = fakeOpenAI(async () => ({}));
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
     expect(wrapped.apiKey).toBe("sk-fake");
     expect((wrapped as any).models.list()).toBe("models");
   });
@@ -132,7 +132,7 @@ describe("wrapOpenAI", () => {
       yield { choices: [{ delta: {} }], usage: { prompt_tokens: 7, completion_tokens: 3 } };
     }
     const client = fakeOpenAI(async () => gen());
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
 
     const stream = await wrapped.chat.completions.create({
       model: "gpt-4o-mini",
@@ -164,7 +164,7 @@ describe("wrapOpenAI", () => {
       yield { usage: { prompt_tokens: 1, completion_tokens: 1 } };
     }
     const client = fakeOpenAI(async () => gen());
-    const wrapped = monitor(client as any, baseOpts);
+    const wrapped = withCostControl(client as any, baseOpts);
     const stream = await wrapped.chat.completions.create({
       model: "gpt-4o",
       messages: [],

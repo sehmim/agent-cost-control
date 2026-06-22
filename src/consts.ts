@@ -5,7 +5,7 @@ import type { ModelRate } from "./types.js";
 export const SDK_VERSION = "0.1.0";
 
 /** Where batched telemetry is POSTed unless the caller overrides it. */
-export const DEFAULT_ENDPOINT = "https://api.agenthelm.dev/v1/events";
+export const DEFAULT_ENDPOINT = "https://agent-cost-controller.vercel.app/v1/events";
 
 /** Flush the queue at least this often (ms). */
 export const DEFAULT_FLUSH_INTERVAL = 5000;

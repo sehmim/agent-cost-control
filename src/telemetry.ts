@@ -31,7 +31,7 @@ export class TelemetryQueue {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.opts.helmKey}`,
+          Authorization: `Bearer ${this.opts.accKey}`,
         },
         body: JSON.stringify({ events }),
       });

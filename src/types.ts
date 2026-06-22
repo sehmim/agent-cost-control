@@ -36,7 +36,7 @@ export interface MonitorOptions {
   /** Identifies which agent the wrapped client belongs to. */
   agentId: string;
   /** Bearer token for the telemetry endpoint. */
-  helmKey: string;
+  accKey: string;
   /** Telemetry ingest URL. Defaults to the hosted endpoint. */
   endpoint?: string;
   /** Flush the queue at least this often (ms). Default 5000. */

@@ -6,10 +6,10 @@ from the code alone, because a `Proxy` makes the indirection invisible at the ca
 ## Setup (happens once)
 
 ```ts
-const client = monitor(new OpenAI({ apiKey }), { agentId: "support-bot", helmKey: "ahk_…" });
+const client = withCostControl(new OpenAI({ apiKey }), { agentId: "support-bot", accKey: "acc_…" });
 ```
 
-1. `monitor()` checks `agentId` + `helmKey` exist and the client looks like OpenAI.
+1. `withCostControl()` checks `agentId` + `accKey` exist and the client looks like OpenAI.
 2. It builds `ResolvedOptions` — your options with defaults filled in from `consts.ts`.
 3. It creates **one** `TelemetryQueue` for this client.
 4. `keepAlive(queue)` registers a `beforeExit` flush (only the first call installs it).
@@ -126,7 +126,7 @@ flush()
    │  take all buffered events, clear the buffer
    ▼
 POST endpoint
-   headers: Authorization: Bearer <helmKey>, Content-Type: application/json
+   headers: Authorization: Bearer <accKey>, Content-Type: application/json
    body:    { events: [...] }
    │
    ├─ ok      → done
@@ -154,7 +154,7 @@ few events aren't lost.
 │        │ fire-and-forget                                   │
 └────────┼───────────────────────────────────────────────────┘
          ▼
-   POST https://api.agenthelm.dev/v1/events   (Bearer helmKey)
+   POST https://agent-cost-controller.vercel.app/v1/events   (Bearer accKey)
 ```
 
 Everything to the left of the HTTP arrow is synchronous with your call only up to

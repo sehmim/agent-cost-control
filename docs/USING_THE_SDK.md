@@ -28,13 +28,13 @@ npm install openai   # peer dependency — bring your own version
 ## 2. Wrap your client
 
 ```ts
-import { monitor, AgentKilledError } from "agent-cost-controller";
+import { withCostControl, AgentKilledError } from "agent-cost-controller";
 import OpenAI from "openai";
 
-const client = monitor(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
+const client = withCostControl(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
   agentId: "orchestrator-planner",          // a stable name per agent
-  helmKey: process.env.AGENTHELM_KEY!,       // the key you minted (api_keys table)
-  endpoint: process.env.AGENTHELM_ENDPOINT,  // see step 3
+  accKey: process.env.ACC_KEY!,       // the key you minted (api_keys table)
+  endpoint: process.env.ACC_ENDPOINT,  // see step 3
   // killCheck defaults to true — leave it on. It's inert until you set a budget
   // + auto-stop on the agent, so it costs nothing until you actually use it.
 });
@@ -58,18 +58,18 @@ const res = await client.chat.completions.create({
 The status endpoint for kill/auto-stop is derived automatically
 (`<base>/v1/agents/<id>/status`) — you don't configure it separately.
 
-> If you omit `endpoint`, the SDK defaults to `https://api.agenthelm.dev/v1/events`,
+> If you omit `endpoint`, the SDK defaults to `https://agent-cost-controller.vercel.app/v1/events`,
 > which isn't a real service. Until you own that domain, always set `endpoint`.
 
 ## 4. Multiple agents in one orchestration
 
 Give each agent its own `agentId` so spend, loops, and bloat are attributed
-correctly. Reuse the same `helmKey`:
+correctly. Reuse the same `accKey`:
 
 ```ts
-const planner    = monitor(new OpenAI(), { agentId: "planner",    helmKey, endpoint });
-const researcher = monitor(new OpenAI(), { agentId: "researcher", helmKey, endpoint });
-const writer     = monitor(new OpenAI(), { agentId: "writer",     helmKey, endpoint });
+const planner    = withCostControl(new OpenAI(), { agentId: "planner",    accKey, endpoint });
+const researcher = withCostControl(new OpenAI(), { agentId: "researcher", accKey, endpoint });
+const writer     = withCostControl(new OpenAI(), { agentId: "writer",     accKey, endpoint });
 ```
 
 Each shows up as a separate row on the dashboard with its own budget and alerts.
@@ -99,9 +99,9 @@ multi-agent orchestration so a killed *sub*agent degrades instead of throwing an
 error that could crash the whole service:
 
 ```ts
-const researcher = monitor(new OpenAI(), {
+const researcher = withCostControl(new OpenAI(), {
   agentId: "researcher",
-  helmKey,
+  accKey,
   endpoint,
   onKilled: ({ agentId }) => {
     log.warn(`${agentId} killed — skipping its step`);
@@ -132,8 +132,8 @@ Either way, no LLM call is made and no spend occurs.
 
 | Symptom | Likely cause |
 | --- | --- |
-| Agent never appears on dashboard | `endpoint` wrong, or `helmKey` not in `api_keys` |
-| 401 from ingest | `helmKey` doesn't match a row in `api_keys` |
+| Agent never appears on dashboard | `endpoint` wrong, or `accKey` not in `api_keys` |
+| 401 from ingest | `accKey` doesn't match a row in `api_keys` |
 | Kill button doesn't stop the agent | no budget/auto-stop set, or `killCheck: false` was passed |
 | A killed subagent crashes the whole run | add an `onKilled` handler so it returns a fallback instead of throwing |
 | `Cannot find module 'agent-cost-controller'` | re-run `npm link agent-cost-controller`; ensure `npm run build` ran |

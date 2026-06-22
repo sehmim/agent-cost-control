@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentKilledError, monitor } from "../src/index.js";
+import { AgentKilledError, withCostControl } from "../src/index.js";
 
 function fakeOpenAI(usage = { prompt_tokens: 1, completion_tokens: 1 }) {
   const create = vi.fn(async () => ({ id: "x", usage }));
@@ -18,7 +18,7 @@ function stubFetch(status: "active" | "killed") {
   });
 }
 
-const base = { agentId: "bot", helmKey: "k", endpoint: ENDPOINT, batchSize: 1 };
+const base = { agentId: "bot", accKey: "k", endpoint: ENDPOINT, batchSize: 1 };
 
 describe("soft-kill", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -26,7 +26,7 @@ describe("soft-kill", () => {
   it("blocks the call and throws when the agent is killed", async () => {
     vi.stubGlobal("fetch", stubFetch("killed"));
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, { ...base, killCheck: true });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: true });
 
     await expect(
       wrapped.chat.completions.create({ model: "gpt-4o", messages: [] }),
@@ -37,7 +37,7 @@ describe("soft-kill", () => {
   it("allows the call when the agent is active", async () => {
     vi.stubGlobal("fetch", stubFetch("active"));
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, { ...base, killCheck: true });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: true });
 
     const res = await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
     expect(res.id).toBe("x");
@@ -48,7 +48,7 @@ describe("soft-kill", () => {
     const fetchMock = stubFetch("killed");
     vi.stubGlobal("fetch", fetchMock);
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, base); // killCheck omitted → defaults true
+    const wrapped = withCostControl(client as any, base); // killCheck omitted → defaults true
 
     await expect(
       wrapped.chat.completions.create({ model: "gpt-4o", messages: [] }),
@@ -60,7 +60,7 @@ describe("soft-kill", () => {
     const fetchMock = stubFetch("killed");
     vi.stubGlobal("fetch", fetchMock);
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, { ...base, killCheck: false });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: false });
 
     await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
     expect(client.create).toHaveBeenCalledOnce();
@@ -71,7 +71,7 @@ describe("soft-kill", () => {
     vi.stubGlobal("fetch", stubFetch("killed"));
     const client = fakeOpenAI();
     const onKilled = vi.fn(() => ({ id: "fallback", killed: true }));
-    const wrapped = monitor(client as any, { ...base, killCheck: true, onKilled });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: true, onKilled });
 
     const res = await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
     expect(res).toEqual({ id: "fallback", killed: true });
@@ -83,7 +83,7 @@ describe("soft-kill", () => {
     const fetchMock = stubFetch("active");
     vi.stubGlobal("fetch", fetchMock);
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, { ...base, killCheck: true });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: true });
 
     await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
     await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
@@ -101,7 +101,7 @@ describe("soft-kill", () => {
       }),
     );
     const client = fakeOpenAI();
-    const wrapped = monitor(client as any, { ...base, killCheck: true });
+    const wrapped = withCostControl(client as any, { ...base, killCheck: true });
 
     const res = await wrapped.chat.completions.create({ model: "gpt-4o", messages: [] });
     expect(res.id).toBe("x");

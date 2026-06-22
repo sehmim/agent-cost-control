@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentKilledError, monitor } from "../src/index.js";
+import { AgentKilledError, withCostControl } from "../src/index.js";
 
 /**
  * These mirror the flawed agents in /agent-testing-playground, adapted to the
@@ -35,7 +35,7 @@ function fakeOpenAI(usageFor: (params: any) => { prompt_tokens: number; completi
 
 const opts = (over: object = {}) => ({
   agentId: "test-agent",
-  helmKey: "ahk_test",
+  accKey: "acc_test",
   endpoint: ENDPOINT,
   batchSize: 1,
   ...over,
@@ -47,7 +47,7 @@ describe("FLAW 1 — runaway loop (same prompt repeated)", () => {
   it("emits an identical prompt hash every call, so the loop is detectable", async () => {
     const { events } = harness();
     const client = fakeOpenAI(() => ({ prompt_tokens: 10, completion_tokens: 5 }));
-    const wrapped = monitor(client as any, opts({ agentId: "test-agent-1" }));
+    const wrapped = withCostControl(client as any, opts({ agentId: "test-agent-1" }));
 
     for (let i = 0; i < 5; i++) {
       await wrapped.chat.completions.create({
@@ -64,7 +64,7 @@ describe("FLAW 1 — runaway loop (same prompt repeated)", () => {
   it("kill switch blocks the runaway loop (the playground's BudgetExceeded stop)", async () => {
     harness(() => "killed");
     const client = fakeOpenAI(() => ({ prompt_tokens: 10, completion_tokens: 5 }));
-    const wrapped = monitor(client as any, opts({ agentId: "test-agent-1", killCheck: true }));
+    const wrapped = withCostControl(client as any, opts({ agentId: "test-agent-1", killCheck: true }));
 
     let completed = 0;
     for (let i = 0; i < 100; i++) {
@@ -92,7 +92,7 @@ describe("FLAW 2 — prompt bloat (history grows every call)", () => {
       prompt_tokens: JSON.stringify(p.messages).length,
       completion_tokens: 5,
     }));
-    const wrapped = monitor(client as any, opts({ agentId: "test-agent-2" }));
+    const wrapped = withCostControl(client as any, opts({ agentId: "test-agent-2" }));
 
     const history: any[] = [{ role: "user", content: "Hello" }];
     for (let i = 0; i < 6; i++) {
@@ -118,7 +118,7 @@ describe("FLAW 3 — cost spike (expensive calls pile up)", () => {
     const { events } = harness();
     // gpt-4: $30/1M in, $60/1M out → 1000 in + 5000 out = $0.33/call
     const client = fakeOpenAI(() => ({ prompt_tokens: 1000, completion_tokens: 5000 }));
-    const wrapped = monitor(client as any, opts({ agentId: "test-agent-3" }));
+    const wrapped = withCostControl(client as any, opts({ agentId: "test-agent-3" }));
 
     for (let i = 0; i < 5; i++) {
       await wrapped.chat.completions.create({
@@ -135,7 +135,7 @@ describe("FLAW 3 — cost spike (expensive calls pile up)", () => {
   it("a killed agent stops further spend (manual or budget-triggered kill)", async () => {
     const { events } = harness(() => "killed");
     const client = fakeOpenAI(() => ({ prompt_tokens: 1000, completion_tokens: 5000 }));
-    const wrapped = monitor(client as any, opts({ agentId: "test-agent-3", killCheck: true }));
+    const wrapped = withCostControl(client as any, opts({ agentId: "test-agent-3", killCheck: true }));
 
     await expect(
       wrapped.chat.completions.create({

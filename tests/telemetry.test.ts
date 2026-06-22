@@ -5,7 +5,7 @@ import type { ResolvedOptions, TelemetryEvent } from "../src/types.js";
 function makeOpts(over: Partial<ResolvedOptions> = {}): ResolvedOptions {
   return {
     agentId: "a1",
-    helmKey: "ahk_test",
+    accKey: "acc_test",
     endpoint: "https://example.test/v1/events",
     flushInterval: 5000,
     batchSize: 50,
@@ -47,7 +47,7 @@ describe("TelemetryQueue", () => {
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(url).toBe("https://example.test/v1/events");
     expect((init as RequestInit).headers).toMatchObject({
-      Authorization: "Bearer ahk_test",
+      Authorization: "Bearer acc_test",
     });
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.events).toHaveLength(2);

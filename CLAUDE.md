@@ -4,13 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agent-cost-controller` — a lightweight Node/TypeScript SDK that wraps an existing OpenAI client to extract token-usage metadata from responses and ship it asynchronously to a telemetry endpoint. It never touches API keys, prompt content, or completion content — only the `usage` object.
+`agent-cost-controller` — a lightweight Node/TypeScript SDK that wraps an existing AI client/model to extract token-usage metadata from responses and ship it asynchronously to a telemetry endpoint. It never touches API keys, prompt content, or completion content — only the `usage` object. One package, four framework adapters behind subpath imports:
+
+| Framework | Subpath | Entry |
+| --------- | ------- | ----- |
+| OpenAI | `agent-cost-controller` | `withCostControl(client, opts)` |
+| Vercel AI SDK / Mastra | `agent-cost-controller/ai` | `withCostControl(model, opts)`, `costControlMiddleware(opts)` |
+| LangChain.js / LangGraph.js | `agent-cost-controller/langchain` | `wrapModel(model, opts)`, `CostControlHandler` |
+| OpenAI Agents SDK | `agent-cost-controller/agents` | `wrapAgentsModel(model, opts)` |
 
 ```typescript
-import { monitor } from "agent-cost-controller";
+import { withCostControl } from "agent-cost-controller";
 import OpenAI from "openai";
 
-const client = monitor(new OpenAI({ apiKey }), { agentId: "support-bot", helmKey: "ahk_..." });
+const client = withCostControl(new OpenAI({ apiKey }), { agentId: "support-bot", accKey: "acc_..." });
 // identical interface — usage is recorded behind the scenes
 const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 ```
@@ -25,7 +32,11 @@ const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 
 ## Architecture
 
-`src/monitor.ts` is the whole entry path: `monitor()` validates options, fills defaults, creates one `TelemetryQueue`, and returns the intercepted client. `intercept()` proxies three levels — `client → chat → completions` — via the small `swap()` helper, replacing only `create` and passing everything else through (methods stay `.bind`-ed so `this` is correct). `traceCreate` runs the real call, then records usage **after** the response: non-streaming reads `usage` off the result; streaming auto-injects `stream_options.include_usage` and reads `usage` off the carrying chunk via a pass-through async generator. `emit()` builds the `TelemetryEvent` and pushes it.
+`src/core.ts` is the framework-agnostic heart. `createSink()` validates options, fills defaults (`resolveOptions`), builds one `TelemetryQueue` + `KillSwitch`, and registers the one-time `beforeExit` flush (`keepAlive`). A `Sink` exposes the three things every adapter needs: `isBlocked()` (kill check), `blocked(model)` (throw `AgentKilledError`, or run `onKilled` and return its value), and `record(rec: CallRecord)` — which fingerprints the prompt, hashes the output, computes cost, and pushes a `TelemetryEvent`. **`CallRecord`** is the normalized shape every adapter produces: `{ model, messages?, inputTokens, outputTokens, toolNames?, outputParts?, stream, startedAt }`. Adding a framework = a new file that hooks the call, gates on `isBlocked`/`blocked`, and feeds `record()` — never re-implement the pipeline.
+
+`src/monitor.ts` (OpenAI) builds a Sink, then `intercept()` proxies three levels — `client → chat → completions` — via the small `swap()` helper, replacing only `create` and passing everything else through (methods stay `.bind`-ed so `this` is correct). `traceCreate` runs the real call, then records usage **after** the response: non-streaming reads `usage` off the result; streaming auto-injects `stream_options.include_usage` and reads `usage` off the carrying chunk via a pass-through async generator.
+
+`src/ai.ts` (Vercel AI SDK + Mastra) returns a `LanguageModelMiddleware` (`specificationVersion: "v3"`) with `wrapGenerate`/`wrapStream`; `withCostControl(model, opts)` is the `wrapLanguageModel` convenience. Mastra needs no separate code — pass the wrapped model to its `Agent`. `src/langchain.ts` ships `CostControlHandler` (a `BaseCallbackHandler` for telemetry) + `wrapModel` (a Proxy that gates `invoke`/`stream`/`batch` on the kill switch and injects the handler), because LangChain callbacks observe but cannot block. `src/agents.ts` wraps an Agents SDK `Model`, intercepting `getResponse`/`getStreamedResponse`. All three read usage **version-tolerantly** (`inputTokens ?? promptTokens`, etc.) and pull tool **names** + hashable output structurally by `.type`.
 
 `src/consts.ts` holds every tunable: `SDK_VERSION`, `DEFAULT_ENDPOINT`, the flush/batch defaults, and the `PRICING` table.
 
@@ -37,12 +48,12 @@ const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 
 ## Key Rules
 
-1. **Never** transmit raw prompt content, completions, or API keys. What leaves the client: the `usage` object, a content-free `PromptFingerprint` (sizes + one-way hash), tool-call **names** (never arguments), and a one-way `output_hash` of the completion (identical outputs collide, the text is not recoverable).
+1. **Never** transmit raw prompt content, completions, or API keys. What leaves the client: the `usage` object, a content-free `PromptFingerprint` (sizes + one-way hash), tool-call **names** (never arguments), and a one-way `output_hash` of the completion (identical outputs collide, the text is not recoverable). This holds for **every** adapter — they all funnel through `Sink.record(CallRecord)`.
 2. **Never** add latency to the LLM call — all telemetry is post-response and async.
-3. Wrapped client must keep **identical return types** — don't break the OpenAI type signature.
-4. `openai` is a **peer dependency** — never bundle it; the user brings their own version.
+3. Wrapped client/model must keep **identical return types** — pass results through untouched; don't break the framework's type signature.
+4. Every framework (`openai`, `ai`, `@langchain/core`, `@openai/agents`) is an **optional peer dependency** — never bundle it; the user brings their own version. tsup externalizes them automatically.
 5. **Node 18+** — use native `fetch`, no axios/node-fetch.
-6. **Zero-config** — only `agentId` and `helmKey` are required.
+6. **Zero-config** — only `agentId` and `accKey` are required.
 
 ## Soft-kill
 
@@ -69,5 +80,7 @@ emits an unhandled rejection that could crash the process.
 
 ## Deferred (not yet built)
 
-Anthropic interception (`src/anthropic.ts` + `@anthropic-ai/sdk` peer dep). `monitor()`'s
-dispatch and `MonitorOptions` leave a clean seam. See `plan.md` for the full original spec.
+Direct Anthropic interception (`src/anthropic.ts` + `@anthropic-ai/sdk` peer dep). The
+`CallRecord`/`Sink` seam in `core.ts` makes this a thin adapter. (Anthropic via the Vercel
+AI SDK or Mastra already works today through `agent-cost-controller/ai`.) See `plan.md` for
+the full original spec.

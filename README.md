@@ -1,24 +1,35 @@
 # Agent Cost Controller
 
-Wrap your OpenAI client to track token usage and cost. One line, zero SDK rewrites. Never touches your API keys, prompts, or completions — only the `usage` object.
+Wrap your AI agents to track token usage and cost. One line, zero rewrites. Never touches your API keys, prompts, or completions — only the `usage` object. Works with **OpenAI**, the **Vercel AI SDK**, **Mastra**, **LangChain.js / LangGraph.js**, and the **OpenAI Agents SDK**.
 
 ## Install
 
 ```bash
-npm install agent-cost-controller openai
+npm install agent-cost-controller
+# plus whichever framework you already use:
+#   openai · ai · @langchain/core · @openai/agents
 ```
 
-Requires Node 18+. `openai` is a peer dependency — bring your own version.
+Requires Node 18+. Every framework is an **optional** peer dependency — install only the one you use, import from the matching subpath:
+
+| Framework | Import | Wrapper |
+| --------- | ------ | ------- |
+| OpenAI | `agent-cost-controller` | `withCostControl(client, opts)` |
+| Vercel AI SDK / Mastra | `agent-cost-controller/ai` | `withCostControl(model, opts)` |
+| LangChain.js / LangGraph.js | `agent-cost-controller/langchain` | `wrapModel(model, opts)` / `CostControlHandler` |
+| OpenAI Agents SDK | `agent-cost-controller/agents` | `wrapAgentsModel(model, opts)` |
+
+All adapters feed the **same** privacy-safe pipeline — usage, a content-free prompt fingerprint, tool **names**, and a one-way output hash. Raw prompts, completions, and keys never leave the process, and telemetry is recorded after the call so it never adds latency.
 
 ## Usage
 
 ```typescript
-import { monitor } from "agent-cost-controller";
+import { withCostControl } from "agent-cost-controller";
 import OpenAI from "openai";
 
-const client = monitor(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
+const client = withCostControl(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
   agentId: "support-bot",
-  helmKey: "ahk_abc123",
+  accKey: "acc_abc123",
 });
 
 // Everything else is unchanged — same methods, same types, same return values.
@@ -41,16 +52,77 @@ for await (const chunk of stream) {
 }
 ```
 
+## Other frameworks
+
+The same `agentId` / `accKey` / kill-switch options apply to every adapter below.
+
+### Vercel AI SDK
+
+Wrap any model and hand it to `generateText` / `streamText`:
+
+```typescript
+import { withCostControl } from "agent-cost-controller/ai";
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const model = withCostControl(openai("gpt-4o"), { agentId: "support-bot", accKey: "acc_…" });
+await generateText({ model, prompt: "Hello" });
+```
+
+### Mastra
+
+Mastra is built on the Vercel AI SDK, so the same wrapper works — pass the wrapped model to your agent:
+
+```typescript
+import { Agent } from "@mastra/core/agent";
+import { withCostControl } from "agent-cost-controller/ai";
+import { openai } from "@ai-sdk/openai";
+
+const agent = new Agent({
+  name: "support-bot",
+  instructions: "Help customers.",
+  model: withCostControl(openai("gpt-4o"), { agentId: "support-bot", accKey: "acc_…" }),
+});
+```
+
+### LangChain.js / LangGraph.js
+
+`wrapModel` enforces the kill switch **and** records telemetry. (For telemetry only, add `new CostControlHandler(opts)` to any run's `callbacks`.)
+
+```typescript
+import { wrapModel } from "agent-cost-controller/langchain";
+import { ChatOpenAI } from "@langchain/openai";
+
+const model = wrapModel(new ChatOpenAI({ model: "gpt-4o" }), { agentId: "support-bot", accKey: "acc_…" });
+await model.invoke("Hello"); // use anywhere, including LangGraph nodes
+```
+
+### OpenAI Agents SDK
+
+```typescript
+import { wrapAgentsModel } from "agent-cost-controller/agents";
+import { Agent, run, OpenAIResponsesModel } from "@openai/agents";
+import OpenAI from "openai";
+
+const model = wrapAgentsModel(new OpenAIResponsesModel(new OpenAI(), "gpt-4o"), {
+  agentId: "support-bot",
+  accKey: "acc_…",
+});
+const agent = new Agent({ name: "Support", model });
+await run(agent, "Hello");
+```
+
 ## Options
 
 | Option          | Required | Default                                  | Description                              |
 | --------------- | -------- | ---------------------------------------- | ---------------------------------------- |
 | `agentId`       | yes      | —                                        | Identifies the agent for this client.    |
-| `helmKey`     | yes      | —                                        | Bearer token for the telemetry endpoint. |
-| `endpoint`      | no       | `https://api.agenthelm.dev/v1/events`  | Telemetry ingest URL.                    |
+| `accKey`     | yes      | —                                        | Bearer token for the telemetry endpoint. |
+| `endpoint`      | no       | `https://agent-cost-controller.vercel.app/v1/events`  | Telemetry ingest URL.                    |
 | `flushInterval` | no       | `5000`                                   | Max ms before a buffered batch is sent.  |
 | `batchSize`     | no       | `50`                                     | Send early once this many events queue.  |
-| `killCheck`     | no       | `false`                                  | Check kill status before each call; throw `AgentKilledError` if killed. |
+| `killCheck`     | no       | `true`                                   | Check kill status before each call; throw `AgentKilledError` if killed. Inert until a budget + auto-stop is set in the dashboard. |
+| `onKilled`      | no       | throw                                    | Run instead of throwing when a killed agent's call is blocked; its return value becomes the response (graceful containment). |
 | `onError`       | no       | swallow                                  | Called on telemetry/pricing failures.    |
 
 ## Kill switch
@@ -61,9 +133,9 @@ of hitting the LLM. Status is cached briefly and **fails open** — a status-end
 never blocks your calls.
 
 ```ts
-import { monitor, AgentKilledError } from "agent-cost-controller";
+import { withCostControl, AgentKilledError } from "agent-cost-controller";
 
-const client = monitor(new OpenAI(), { agentId: "support-bot", helmKey: "ahk_…", killCheck: true });
+const client = withCostControl(new OpenAI(), { agentId: "support-bot", accKey: "acc_…", killCheck: true });
 
 try {
   await client.chat.completions.create({ model: "gpt-4o", messages });
@@ -99,7 +171,7 @@ The hash is one-way: identical prompts collide so you can correlate them, but th
 
 ## How it works
 
-`monitor()` returns a Proxy over your client. It intercepts only `chat.completions.create`, reads the `usage` object **after** the response returns, computes cost from a static price table, fingerprints the prompt, and pushes the record onto an in-memory queue that flushes in batches via `fetch`. Telemetry is fire-and-forget: it never adds latency and never throws into your request path.
+Each adapter hooks its framework at the model boundary (`withCostControl()` proxies `chat.completions.create`; the AI SDK uses `LanguageModelMiddleware`; LangChain uses a callback handler + model wrap; the Agents SDK wraps the `Model`). All of them normalize the finished call into one `CallRecord` and feed a single shared core: it reads the `usage` object **after** the response returns, computes cost from a static price table, fingerprints the prompt, and pushes the record onto an in-memory queue that flushes in batches via `fetch`. Telemetry is fire-and-forget: it never adds latency and never throws into your request path.
 
 For a deeper walkthrough — file-by-file architecture and a step-by-step trace of a call — see [`docs/`](./docs/README.md).
 

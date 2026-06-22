@@ -1,7 +1,7 @@
 {
   "name": "agent-cost-controller",
-  "version": "0.1.0",
-  "description": "Wrap your OpenAI client to track token usage and cost. Never touches keys, prompts, or completions.",
+  "version": "0.1.4",
+  "description": "Wrap your OpenAI, Vercel AI SDK, Mastra, LangChain, or OpenAI Agents calls to track token usage and cost. Never touches keys, prompts, or completions.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -11,6 +11,21 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
+    },
+    "./ai": {
+      "types": "./dist/ai.d.ts",
+      "import": "./dist/ai.mjs",
+      "require": "./dist/ai.cjs"
+    },
+    "./langchain": {
+      "types": "./dist/langchain.d.ts",
+      "import": "./dist/langchain.mjs",
+      "require": "./dist/langchain.cjs"
+    },
+    "./agents": {
+      "types": "./dist/agents.d.ts",
+      "import": "./dist/agents.mjs",
+      "require": "./dist/agents.cjs"
     }
   },
   "files": [
@@ -23,10 +38,16 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "openai",
+    "vercel-ai-sdk",
+    "mastra",
+    "langchain",
+    "langgraph",
+    "agents",
     "finops",
     "tokens",
     "cost",
@@ -35,9 +56,29 @@
   ],
   "license": "MIT",
   "peerDependencies": {
+    "@langchain/core": ">=0.3",
+    "@openai/agents": ">=0.1",
+    "ai": ">=5",
     "openai": ">=4"
   },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "@openai/agents": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@langchain/core": "^1.2.0",
+    "@openai/agents": "^0.11.8",
+    "ai": "^6.0.208",
     "openai": "^4.77.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",

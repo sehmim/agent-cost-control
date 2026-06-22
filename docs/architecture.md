@@ -25,7 +25,7 @@ src/
             ▼   ▼   ▼                ▼
    telemetry  pricing  fingerprint  consts
        │         │                    ▲
-       └─────────┴────────────────────┘  (pricing & monitor read consts)
+       └─────────┴────────────────────┘  (pricing & withCostControl read consts)
 
    types.ts  ← imported by everyone for shapes (no runtime code)
 ```
@@ -39,7 +39,7 @@ provider-agnostic, which is what keeps a future `anthropic` path cheap.
 
 This is the whole entry path. Worth reading top to bottom. Key pieces:
 
-- **`monitor(client, options)`** — validates that `agentId` + `helmKey` are present,
+- **`withCostControl(client, options)`** — validates that `agentId` + `accKey` are present,
   confirms the client looks like an OpenAI client, fills in defaults from `consts`,
   creates one `TelemetryQueue`, and returns the intercepted client.
 - **`intercept()`** — wraps the client so only `chat.completions.create` is replaced.
@@ -66,7 +66,7 @@ An in-memory buffer with two triggers to flush:
 - **size** — once `batchSize` events are buffered, flush immediately;
 - **time** — otherwise a `setInterval` flushes every `flushInterval` ms.
 
-`flush()` POSTs `{ events }` with a `Bearer ${helmKey}` header via `fetch`. Any failure
+`flush()` POSTs `{ events }` with a `Bearer ${accKey}` header via `fetch`. Any failure
 (network error or non-2xx) is handed to `onError` and never thrown. The timer is
 `unref`'d so it never keeps the Node process alive on its own.
 
@@ -98,5 +98,5 @@ shipped), `PromptFingerprint`, and `ModelRate`.
 
 ### `index.ts`
 
-The public surface. Exports `monitor`, plus `calculateCost`, `fingerprintMessages`, and
+The public surface. Exports `withCostControl`, plus `calculateCost`, `fingerprintMessages`, and
 `PRICING` for callers who want them, and the types.

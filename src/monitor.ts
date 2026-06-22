@@ -1,20 +1,5 @@
-import {
-  DEFAULT_BATCH_SIZE,
-  DEFAULT_ENDPOINT,
-  DEFAULT_FLUSH_INTERVAL,
-  SDK_VERSION,
-} from "./consts.js";
-import { calculateCost } from "./pricing.js";
-import { fingerprintMessages, hashOutput } from "./fingerprint.js";
-import { AgentKilledError, KillSwitch } from "./kill.js";
-import { TelemetryQueue } from "./telemetry.js";
-import type {
-  KillInfo,
-  MonitorOptions,
-  PromptFingerprint,
-  ResolvedOptions,
-  TelemetryEvent,
-} from "./types.js";
+import { createSink, Sink } from "./core.js";
+import type { MonitorOptions } from "./types.js";
 
 // The only parts of an OpenAI response/chunk we read.
 interface Usage {
@@ -68,41 +53,23 @@ function outputParts(choices: Choice[] | null | undefined, pick: (c: Choice) => 
   return parts;
 }
 
-// Queues kept alive so we can flush them all once on process exit.
-const liveQueues = new Set<TelemetryQueue>();
-let exitHookInstalled = false;
-
 /**
  * Wrap an OpenAI client so token usage and cost are recorded asynchronously.
  * The returned client behaves identically — same methods, same types, same
- * return values. Only `agentId` and `helmKey` are required.
+ * return values. Only `agentId` and `accKey` are required.
  */
-export function monitor<T extends object>(client: T, options: MonitorOptions): T {
-  if (!options?.agentId || !options?.helmKey) {
-    throw new Error("agent-cost-controller: monitor() requires both `agentId` and `helmKey`.");
+export function withCostControl<T extends object>(client: T, options: MonitorOptions): T {
+  if (!options?.agentId || !options?.accKey) {
+    throw new Error("agent-cost-controller: withCostControl() requires both `agentId` and `accKey`.");
   }
   if (!isOpenAIClient(client)) {
     throw new Error(
-      "agent-cost-controller: unsupported client. monitor() currently supports the OpenAI client (one exposing chat.completions.create).",
+      "agent-cost-controller: unsupported client. withCostControl() supports the OpenAI client (one exposing chat.completions.create). For other frameworks import the matching adapter: agent-cost-controller/ai, /langchain, or /agents.",
     );
   }
 
-  const opts: ResolvedOptions = {
-    agentId: options.agentId,
-    helmKey: options.helmKey,
-    endpoint: options.endpoint ?? DEFAULT_ENDPOINT,
-    flushInterval: options.flushInterval ?? DEFAULT_FLUSH_INTERVAL,
-    batchSize: options.batchSize ?? DEFAULT_BATCH_SIZE,
-    killCheck: options.killCheck ?? true,
-    onKilled: options.onKilled,
-    onError: options.onError ?? (() => {}),
-  };
-
-  const queue = new TelemetryQueue(opts);
-  const kill = new KillSwitch(opts);
-  keepAlive(queue);
-
-  return intercept(client, queue, opts, kill);
+  const sink = createSink(options);
+  return intercept(client, sink);
 }
 
 function isOpenAIClient(client: unknown): boolean {
@@ -115,17 +82,12 @@ function isOpenAIClient(client: unknown): boolean {
  * and passes everything else straight through. We proxy three levels —
  * client → chat → completions — replacing only the `create` method.
  */
-function intercept<T extends object>(
-  client: T,
-  queue: TelemetryQueue,
-  opts: ResolvedOptions,
-  kill: KillSwitch,
-): T {
+function intercept<T extends object>(client: T, sink: Sink): T {
   return swap(client, "chat", (chat) =>
     swap(chat, "completions", (completions) =>
       swap(completions, "create", (create) => {
         const original = create.bind(completions);
-        return (...args: unknown[]) => traceCreate(original, args, queue, opts, kill);
+        return (...args: unknown[]) => traceCreate(original, args, sink);
       }),
     ),
   );
@@ -145,24 +107,23 @@ function swap<T extends object>(obj: T, key: string, replace: (value: any) => un
   });
 }
 
+interface TraceContext {
+  sink: Sink;
+  model: string;
+  messages: unknown;
+  start: number;
+}
+
 /**
  * Wraps the real create(): first refuse the call if the agent is killed, then
  * run it and record usage — without changing what the caller gets back.
  */
-function traceCreate(
-  create: (...a: unknown[]) => unknown,
-  args: unknown[],
-  queue: TelemetryQueue,
-  opts: ResolvedOptions,
-  kill: KillSwitch,
-) {
+function traceCreate(create: (...a: unknown[]) => unknown, args: unknown[], sink: Sink) {
   const params = (args[0] ?? {}) as Record<string, unknown>;
   const ctx: TraceContext = {
-    queue,
-    opts,
-    kill,
+    sink,
     model: String(params.model ?? "unknown"),
-    prompt: fingerprintMessages(params.messages),
+    messages: params.messages,
     start: Date.now(),
   };
 
@@ -181,31 +142,22 @@ function traceCreate(
   return runOnce(create, args, ctx);
 }
 
-/** True only when kill-checking is on and the backend reports this agent killed. */
-async function isBlocked(ctx: TraceContext): Promise<boolean> {
-  return ctx.opts.killCheck && (await ctx.kill.isKilled(ctx.opts.agentId));
-}
-
-/**
- * Decide what a killed agent's call resolves to. With an `onKilled` handler the
- * caller stays in control — its return value becomes the response, so a killed
- * (sub)agent degrades gracefully instead of throwing into the host. Without one
- * we throw `AgentKilledError` to halt the loop. Either way the real LLM call is
- * never made, and only this agent's client is affected.
- */
-function blocked(ctx: TraceContext): unknown {
-  const info: KillInfo = { agentId: ctx.opts.agentId, model: ctx.model };
-  if (ctx.opts.onKilled) return ctx.opts.onKilled(info);
-  throw new AgentKilledError(ctx.opts.agentId);
-}
-
 /** Non-streaming: usage, tool calls, and output are on the resolved response. */
 async function runOnce(create: (...a: unknown[]) => unknown, args: unknown[], ctx: TraceContext) {
-  if (await isBlocked(ctx)) return blocked(ctx);
+  if (await ctx.sink.isBlocked()) return ctx.sink.blocked(ctx.model);
   const res = (await create(...args)) as Response;
   const tools = toolNames(res?.choices, (c) => c.message?.tool_calls);
-  const outHash = hashOutput(outputParts(res?.choices, (c) => c.message));
-  emit(ctx, false, res?.usage?.prompt_tokens ?? 0, res?.usage?.completion_tokens ?? 0, tools, outHash);
+  const out = outputParts(res?.choices, (c) => c.message);
+  ctx.sink.record({
+    model: ctx.model,
+    messages: ctx.messages,
+    inputTokens: res?.usage?.prompt_tokens ?? 0,
+    outputTokens: res?.usage?.completion_tokens ?? 0,
+    toolNames: tools,
+    outputParts: out,
+    stream: false,
+    startedAt: ctx.start,
+  });
   return res;
 }
 
@@ -220,8 +172,8 @@ async function startStream(
   args: unknown[],
   ctx: TraceContext,
 ): Promise<AsyncIterable<Chunk>> {
-  if (await isBlocked(ctx)) {
-    blocked(ctx); // throws when there's no onKilled handler
+  if (await ctx.sink.isBlocked()) {
+    ctx.sink.blocked(ctx.model); // throws when there's no onKilled handler
     return emptyStream();
   }
   const stream = (await create(...args)) as AsyncIterable<Chunk>;
@@ -252,51 +204,15 @@ async function* passthrough(stream: AsyncIterable<Chunk>, ctx: TraceContext) {
       yield chunk;
     }
   } finally {
-    emit(ctx, true, input, output, tools, hashOutput(out));
+    ctx.sink.record({
+      model: ctx.model,
+      messages: ctx.messages,
+      inputTokens: input,
+      outputTokens: output,
+      toolNames: tools,
+      outputParts: out,
+      stream: true,
+      startedAt: ctx.start,
+    });
   }
-}
-
-interface TraceContext {
-  queue: TelemetryQueue;
-  opts: ResolvedOptions;
-  kill: KillSwitch;
-  model: string;
-  prompt: PromptFingerprint | undefined;
-  start: number;
-}
-
-/** Build a telemetry event from a finished call and queue it. */
-function emit(
-  ctx: TraceContext,
-  stream: boolean,
-  input: number,
-  output: number,
-  tools: string[],
-  outputHash: string | undefined,
-): void {
-  const event: TelemetryEvent = {
-    agent_id: ctx.opts.agentId,
-    model: ctx.model,
-    input_tokens: input,
-    output_tokens: output,
-    cost_usd: calculateCost(ctx.model, input, output, ctx.opts.onError),
-    latency_ms: Date.now() - ctx.start,
-    timestamp: new Date().toISOString(),
-    sdk_version: SDK_VERSION,
-    stream,
-    ...(ctx.prompt ? { prompt: ctx.prompt } : {}),
-    ...(tools.length ? { tool_calls: tools } : {}),
-    ...(outputHash ? { output_hash: outputHash } : {}),
-  };
-  ctx.queue.push(event);
-}
-
-/** Flush every live queue once when the process is about to exit. */
-function keepAlive(queue: TelemetryQueue): void {
-  liveQueues.add(queue);
-  if (exitHookInstalled) return;
-  exitHookInstalled = true;
-  process.on("beforeExit", () => {
-    for (const q of liveQueues) void q.flush();
-  });
 }

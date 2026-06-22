@@ -4,7 +4,7 @@ Start here if the codebase feels opaque.
 
 ## The one-paragraph mental model
 
-You hand `monitor()` your OpenAI client. It gives you back a **look-alike** client
+You hand `withCostControl()` your OpenAI client. It gives you back a **look-alike** client
 (a `Proxy`) that behaves exactly the same — except every time you call
 `chat.completions.create`, it quietly reads the token `usage` off the response,
 works out the cost, summarizes the prompt's *shape* (never its content), and drops
@@ -12,7 +12,7 @@ a small record into an in-memory queue. That queue ships records to your telemet
 endpoint in batches, in the background. Your call is never slowed down or changed.
 
 ```
-your code → monitor(client) → looks identical → you call create() as normal
+your code → withCostControl(client) → looks identical → you call create() as normal
                                    │
                                    └─ after each call: usage + cost + prompt shape → queue → HTTP
 ```

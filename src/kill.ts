@@ -32,7 +32,7 @@ export class KillSwitch {
 
     try {
       const res = await fetch(statusUrl(this.opts.endpoint, agentId), {
-        headers: { Authorization: `Bearer ${this.opts.helmKey}` },
+        headers: { Authorization: `Bearer ${this.opts.accKey}` },
       });
       if (!res.ok) return false; // fail open
       const body = (await res.json()) as { status?: string };
