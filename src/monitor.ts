@@ -1,5 +1,5 @@
-import { createSink, Sink } from "./core.js";
-import type { MonitorOptions } from "./types.js";
+import { createSink, Sink, type RoutingMeta } from "./core.js";
+import type { AdvancedOptions } from "./types.js";
 
 // The only parts of an OpenAI response/chunk we read.
 interface Usage {
@@ -58,7 +58,7 @@ function outputParts(choices: Choice[] | null | undefined, pick: (c: Choice) => 
  * The returned client behaves identically — same methods, same types, same
  * return values. Only `agentId` and `accKey` are required.
  */
-export function withCostControl<T extends object>(client: T, options: MonitorOptions): T {
+export function withCostControl<T extends object>(client: T, options: AdvancedOptions): T {
   if (!options?.agentId || !options?.accKey) {
     throw new Error("agent-cost-controller: withCostControl() requires both `agentId` and `accKey`.");
   }
@@ -111,6 +111,8 @@ interface TraceContext {
   sink: Sink;
   model: string;
   messages: unknown;
+  /** Number of tools offered in the request, for routing decisions. */
+  toolCount: number;
   start: number;
 }
 
@@ -124,6 +126,7 @@ function traceCreate(create: (...a: unknown[]) => unknown, args: unknown[], sink
     sink,
     model: String(params.model ?? "unknown"),
     messages: params.messages,
+    toolCount: Array.isArray(params.tools) ? (params.tools as unknown[]).length : 0,
     start: Date.now(),
   };
 
@@ -142,14 +145,67 @@ function traceCreate(create: (...a: unknown[]) => unknown, args: unknown[], sink
   return runOnce(create, args, ctx);
 }
 
-/** Non-streaming: usage, tool calls, and output are on the resolved response. */
+/**
+ * Non-streaming: refuse if killed, then run the pre-call pipeline (routing +
+ * cache). A cache hit replays the stored response and skips the model call; a
+ * routed model is swapped into the params, with a fallback to the original model
+ * if the routed call errors. Usage/output are recorded after, as before.
+ */
 async function runOnce(create: (...a: unknown[]) => unknown, args: unknown[], ctx: TraceContext) {
   if (await ctx.sink.isBlocked()) return ctx.sink.blocked(ctx.model);
-  const res = (await create(...args)) as Response;
+
+  const pre = await ctx.sink.preCall({
+    model: ctx.model,
+    messages: ctx.messages,
+    toolCount: ctx.toolCount,
+  });
+
+  // Cache hit: replay the stored response verbatim, no spend.
+  if (pre.cacheHit && pre.cachedResponse !== undefined) {
+    recordResponse(ctx, pre.cachedResponse as Response, pre.model, undefined, true);
+    return pre.cachedResponse;
+  }
+
+  // Routing: swap the model param when the router picked a different one.
+  let callArgs = args;
+  if (pre.model !== ctx.model) {
+    const params = { ...(args[0] as Record<string, unknown>), model: pre.model };
+    callArgs = [params, ...args.slice(1)];
+  }
+
+  let usedModel = pre.model;
+  let routing = pre.routing;
+  let res: Response;
+  try {
+    res = (await create(...callArgs)) as Response;
+  } catch (err) {
+    // Fallback chain: a routed call that throws retries on the original model.
+    if (routing && pre.model !== ctx.model) {
+      res = (await create(...args)) as Response;
+      usedModel = ctx.model;
+      routing = { ...routing, to: ctx.model, fallback: true };
+    } else {
+      throw err;
+    }
+  }
+
+  if (pre.cacheKey) ctx.sink.storeCache(pre.cacheKey, res);
+  recordResponse(ctx, res, usedModel, routing, false);
+  return res;
+}
+
+/** Extract usage/tools/output from a response and record it (routed/cached aware). */
+function recordResponse(
+  ctx: TraceContext,
+  res: Response,
+  model: string,
+  routing: RoutingMeta | undefined,
+  cacheHit: boolean,
+) {
   const tools = toolNames(res?.choices, (c) => c.message?.tool_calls);
   const out = outputParts(res?.choices, (c) => c.message);
   ctx.sink.record({
-    model: ctx.model,
+    model,
     messages: ctx.messages,
     inputTokens: res?.usage?.prompt_tokens ?? 0,
     outputTokens: res?.usage?.completion_tokens ?? 0,
@@ -157,8 +213,9 @@ async function runOnce(create: (...a: unknown[]) => unknown, args: unknown[], ct
     outputParts: out,
     stream: false,
     startedAt: ctx.start,
+    routing,
+    cacheHit,
   });
-  return res;
 }
 
 /**

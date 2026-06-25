@@ -1,5 +1,5 @@
 import { KILL_CACHE_MS } from "./consts.js";
-import type { ResolvedOptions } from "./types.js";
+import type { RemoteConfig, ResolvedOptions } from "./types.js";
 
 /** Thrown by a monitored call when the agent has been killed from the dashboard. */
 export class AgentKilledError extends Error {
@@ -9,40 +9,50 @@ export class AgentKilledError extends Error {
   }
 }
 
-interface CacheEntry {
+interface StatusEntry {
   killed: boolean;
+  config?: RemoteConfig;
   at: number;
 }
 
 /**
- * Checks whether an agent has been killed, by polling the status endpoint.
- * Results are cached briefly so we don't add a network round-trip to every call.
- * **Fails open**: any lookup failure is treated as "not killed" — a flaky network
- * must never block the caller's real work.
+ * Polls the status endpoint for both kill state and (optionally) pushed config.
+ * One fetch serves both `isKilled()` and `getConfig()`, cached briefly so we add
+ * at most one round-trip per `KILL_CACHE_MS`. **Fails open**: any lookup failure
+ * is treated as "not killed, no config" — a flaky network never blocks real work.
  */
 export class KillSwitch {
-  private cache = new Map<string, CacheEntry>();
+  private cache = new Map<string, StatusEntry>();
 
   constructor(private readonly opts: ResolvedOptions) {}
 
-  async isKilled(agentId: string): Promise<boolean> {
+  private async getStatus(agentId: string): Promise<StatusEntry> {
     const now = Date.now();
     const hit = this.cache.get(agentId);
-    if (hit && now - hit.at < KILL_CACHE_MS) return hit.killed;
+    if (hit && now - hit.at < KILL_CACHE_MS) return hit;
 
     try {
       const res = await fetch(statusUrl(this.opts.endpoint, agentId), {
         headers: { Authorization: `Bearer ${this.opts.accKey}` },
       });
-      if (!res.ok) return false; // fail open
-      const body = (await res.json()) as { status?: string };
-      const killed = body?.status === "killed";
-      this.cache.set(agentId, { killed, at: now });
-      return killed;
+      if (!res.ok) return { killed: false, at: now }; // fail open, don't cache
+      const body = (await res.json()) as { status?: string; config?: RemoteConfig };
+      const entry: StatusEntry = { killed: body?.status === "killed", config: body?.config, at: now };
+      this.cache.set(agentId, entry);
+      return entry;
     } catch (err) {
       this.opts.onError(err instanceof Error ? err : new Error(String(err)));
-      return false; // fail open
+      return { killed: false, at: now }; // fail open
     }
+  }
+
+  async isKilled(agentId: string): Promise<boolean> {
+    return (await this.getStatus(agentId)).killed;
+  }
+
+  /** Config the backend pushed for this agent (routing policy, etc.), if any. */
+  async getConfig(agentId: string): Promise<RemoteConfig | undefined> {
+    return (await this.getStatus(agentId)).config;
   }
 }
 

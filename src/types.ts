@@ -1,3 +1,6 @@
+import type { RoutePolicy } from "./router.js";
+import type { CacheOptions } from "./cache.js";
+
 /**
  * Privacy-safe summary of a prompt. No raw content — just shape and a one-way
  * hash, enough to diagnose token waste (bloat, loops, fat system prompts).
@@ -30,6 +33,12 @@ export interface TelemetryEvent {
   tool_calls?: string[];
   /** One-way hash of the output (completion / tool-call JSON). Content-free; detects a stuck model. Absent when no output. */
   output_hash?: string;
+  /** Set when the router sent the call to a different model than requested. */
+  routing?: { from: string; to: string; rule: string | null; fallback: boolean };
+  /** Present only on a cache hit (the LLM call was skipped). */
+  cache?: { hit: boolean };
+  /** Advanced features active on this client, e.g. ["routing","cache"]. */
+  sdk_features?: string[];
 }
 
 export interface MonitorOptions {
@@ -66,6 +75,28 @@ export interface MonitorOptions {
 export interface KillInfo {
   agentId: string;
   model: string;
+}
+
+/**
+ * `MonitorOptions` plus the opt-in cost-reduction features. Backward compatible:
+ * `{ agentId, accKey }` alone still works. `router`/`cache` currently take effect
+ * on the OpenAI adapter (`withCostControl`); other adapters record telemetry only.
+ */
+export interface AdvancedOptions extends MonitorOptions {
+  /** Model routing. A policy object, the "auto" heuristic, or false/undefined to disable. */
+  router?: RoutePolicy | "auto" | false;
+  /** Exact-match response cache (memory or BYODB Redis/Upstash). Opt-in. */
+  cache?: CacheOptions;
+}
+
+/**
+ * Config the backend can push down via the status endpoint (alongside kill state).
+ * Lets the dashboard / auto-remediation steer the SDK without a new poll.
+ */
+export interface RemoteConfig {
+  routing?: RoutePolicy | "auto";
+  /** Cache backend pushed from the dashboard (managed proxy or BYODB creds). */
+  cache?: CacheOptions;
 }
 
 /** Internal resolved config — all defaults filled in. */

@@ -23,11 +23,16 @@
 
 # 🌱 Agent Cost Controller
 
-**A carnivorous plant for your AI agents.** It quietly watches every LLM call,
-digests the token usage into cost telemetry, and — when an agent goes
-runaway — _chomps_ it dead before it eats your budget.
+**Integrate once, then forget it.** Wrap your existing LLM client in a single line and
+Agent Cost Controller automatically meters every call — tokens, cost, latency, prompt
+shape, and tool usage — and streams it to a live dashboard. No rewrites, no per-call
+instrumentation.
 
-One line. Zero rewrites. Never touches your keys, prompts, or completions.
+From there it becomes a control plane: set **budgets** and **hard call caps**, **auto-stop**
+runaway agents, surface **loops and prompt bloat**, **route** cheap calls to cheaper models,
+and **cache** repeat responses in your own database — all without touching your code again.
+
+It never sees your API keys, prompts, or completions, and never adds latency to a call.
 
 [![npm version](https://img.shields.io/npm/v/agent-cost-controller.svg?color=2e8b57&label=npm)](https://www.npmjs.com/package/agent-cost-controller)
 [![node](https://img.shields.io/node/v/agent-cost-controller.svg?color=2e8b57)](https://nodejs.org)
@@ -38,15 +43,20 @@ One line. Zero rewrites. Never touches your keys, prompts, or completions.
 
 ---
 
-## 🌿 What it feeds on
+## 🌿 Capabilities
 
 | | |
 | --- | --- |
-| 🪴 **One-line wrap** | `withCostControl(client, opts)` — same methods, same types, same return values. |
-| 🔒 **Privacy-first** | Ships only the `usage` object, a content-free prompt fingerprint, tool **names**, and a one-way output hash. Raw prompts, completions, and API keys never leave the process. |
+| 🪴 **Integrate &amp; forget** | One-line wrap — `withCostControl(client, opts)` — keeps the same methods, types, and return values. Every call after that is metered automatically and reported to the dashboard. |
+| 📊 **Automatic monitoring** | Per-call tokens, cost, latency, model, a content-free prompt fingerprint, tool **names**, and an output hash — attributed per agent, no manual logging. |
+| 🔒 **Privacy-first** | Ships only the `usage` object plus content-free metadata. Raw prompts, completions, and API keys never leave the process. |
 | ⚡ **Zero latency** | Telemetry is read **after** the response and flushed fire-and-forget. Never blocks, never throws into your request path. |
-| 🦷 **The chomp** | Optional kill switch stops a runaway agent mid-loop — `AgentKilledError` instead of another expensive call. |
-| 🌎 **Framework-agnostic** | OpenAI · Vercel AI SDK · Mastra · LangChain.js / LangGraph.js · OpenAI Agents SDK. |
+| 🦷 **Budgets &amp; auto-stop** | Set a spend budget or hard call cap in the dashboard; the kill switch halts a runaway agent mid-loop — `AgentKilledError` (or a graceful fallback) instead of another expensive call. |
+| 🔁 **Waste detection** | Loops, prompt bloat, call spikes, and stuck retries are detected from the fingerprint stream and surfaced as dashboard alerts with estimated savings. |
+| 💸 **Model routing** | Optionally downshift cheap, simple calls to a cheaper model — automatically, or by an explicit policy. |
+| 🗄️ **Response cache (BYO DB)** | Replay identical requests for $0 from memory, your own Redis/Upstash, or a hosted store — configurable per agent from the dashboard. |
+| 📈 **Cost per success** | `reportOutcome()` marks a completion `success`/`failure`/`rework` so the dashboard tracks **cost ÷ successful completions**, not just raw tokens. |
+| 🌎 **Framework-agnostic** | OpenAI · Vercel AI SDK · Mastra · LangChain.js / LangGraph.js · OpenAI Agents SDK — one shared, privacy-safe pipeline. |
 
 ## 🪴 Install
 
@@ -186,13 +196,95 @@ await run(agent, "Hello");
 | `killCheck`     | no       | `true`                                   | Check kill status before each call; throw `AgentKilledError` if killed. Inert until a budget + auto-stop is set in the dashboard. |
 | `onKilled`      | no       | throw                                    | Run instead of throwing when a killed agent's call is blocked; its return value becomes the response (graceful containment). |
 | `onError`       | no       | swallow                                  | Called on telemetry/pricing failures.    |
+| `router`        | no       | off                                      | Model routing: `"auto"` (downshift cheap, tool-free calls) or a `RoutePolicy`. OpenAI adapter only. |
+| `cache`         | no       | off                                      | Exact-match response cache (`{ provider: "memory" \| "upstash" \| "redis" \| "managed", … }`). OpenAI adapter only. |
 
-## 🦷 The chomp (kill switch)
+## 💸 Cost reduction (routing + cache)
 
-Set `killCheck: true` and the plant bites back. Before each call the SDK checks the
-agent's status; if it's been killed from the dashboard, the call throws
-`AgentKilledError` instead of hitting the LLM. Status is cached briefly and
-**fails open** — a status-endpoint outage never blocks your calls.
+Two **opt-in**, zero-latency ways to spend less — both on the OpenAI adapter
+(`withCostControl(client, …)`). They run *before* the call, fail open, and keep the
+response shape identical.
+
+**Model routing** — send cheap, simple calls to a cheaper model:
+
+```ts
+import { withCostControl } from "agent-cost-controller";
+
+// "auto": tool-free calls under ~2k tokens downshift (e.g. gpt-4 → gpt-4o-mini).
+const client = withCostControl(new OpenAI(), { agentId: "bot", accKey: "acc_…", router: "auto" });
+
+// …or an explicit policy (priority-sorted; first match wins):
+const client2 = withCostControl(new OpenAI(), {
+  agentId: "bot",
+  accKey: "acc_…",
+  router: { routes: [{ name: "tiny", condition: { type: "token_estimate", max: 500 }, targetModel: "gpt-4o-mini" }] },
+});
+```
+
+The model actually used is what's recorded, so cost telemetry reflects routing. A routed
+call that errors automatically retries on the original model (`routing.fallback: true`). The
+dashboard can also **push** a routing policy down via the status endpoint — that's how
+auto-remediation's "downshift" action takes effect with no code change.
+
+**Response cache** — replay an identical request instead of paying for it again:
+
+```ts
+const client = withCostControl(new OpenAI(), {
+  agentId: "bot",
+  accKey: "acc_…",
+  cache: { provider: "memory" }, // or "upstash" / "redis" with { url, token? } — BYODB
+});
+```
+
+Keyed on the content-free prompt fingerprint + model (one keyed read, no embedding call). A
+hit skips the LLM entirely and is recorded with `cache.hit: true` and `$0` cost. **The cache
+stores the raw provider response, which lives only in your store (memory / your Redis /
+Upstash) — it is never sent to the telemetry endpoint.**
+
+Prefer not to manage a store? Set `provider: "managed"` (or just flip on the cache from the
+dashboard) — the SDK proxies through the hosted ACC cache using your accKey; our storage
+credentials never reach your process and a per-account storage cap is enforced server-side:
+
+```ts
+const client = withCostControl(new OpenAI(), { agentId: "bot", accKey: "acc_…", cache: { provider: "managed" } });
+```
+
+**Dashboard-driven config.** The cache backend (off / built-in managed / bring-your-own-DB)
+can be set per agent in the dashboard and is pushed to the SDK via the status endpoint — so
+you can turn caching on, or swap your BYODB credentials, without a code change. A pushed
+config takes precedence over the local `cache` option.
+
+## 📈 Cost per successful completion
+
+Token savings only count if reliability holds — a cheap-but-wrong answer that needs rework
+isn't cheap. `reportOutcome` lets you mark how a finished workflow turned out, so the
+dashboard can divide spend by *successful* completions and show failure / rework rates.
+
+```ts
+import { reportOutcome } from "agent-cost-controller";
+
+const res = await client.chat.completions.create({ model: "gpt-4o", messages });
+
+// Judge success however you already do (schema validated? user accepted? eval passed?):
+await reportOutcome("success", { agentId: "support-bot", accKey: "acc_…" });
+// …or "failure" / "rework" — plus an optional `workflow` label for by-workflow rollups.
+```
+
+**Mechanics.** It's a **standalone, stateless function**, not something hung off the wrapped
+client — the wrapper must keep your framework's exact return type (so there's no per-call
+handle), and the outcome is judged *after* the response anyway. So it works identically
+across **every** adapter. It POSTs to a derived `…/outcomes` endpoint with your `accKey` and
+**fails open** (a transport error never throws into your code). Privacy holds: only the enum
+and an optional workflow **label** leave the process — never prompt or response content.
+
+## 🦷 The chomp (budgets &amp; kill switch)
+
+Set a **budget** or **hard call cap** on an agent in the dashboard and turn on **auto-stop**;
+once spend or call count crosses the limit the backend marks the agent killed. With
+`killCheck` on (the default), the SDK checks the agent's status before each call and throws
+`AgentKilledError` instead of hitting the LLM — stopping a runaway loop before it spends more.
+Status is cached briefly and **fails open**, so a status-endpoint outage never blocks your
+calls.
 
 <details open>
 <summary><b>Catching the bite</b></summary>

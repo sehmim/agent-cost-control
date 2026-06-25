@@ -2,7 +2,7 @@
 import type { ModelRate } from "./types.js";
 
 /** Stamped onto every telemetry event. Keep in sync with package.json. */
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.2.0";
 
 /** Where batched telemetry is POSTed unless the caller overrides it. */
 export const DEFAULT_ENDPOINT = "https://agent-cost-controller.vercel.app/v1/events";

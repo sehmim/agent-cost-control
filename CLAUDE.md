@@ -40,6 +40,59 @@ const res = await client.chat.completions.create({ model: "gpt-4o", messages });
 
 `src/consts.ts` holds every tunable: `SDK_VERSION`, `DEFAULT_ENDPOINT`, the flush/batch defaults, and the `PRICING` table.
 
+## Cost-reduction features (routing + cache) — the pre-call seam
+
+`record()` runs **after** a call; routing and caching must run **before** it, so
+`core.ts` adds `Sink.preCall(req: PreCallRequest): Promise<PreCallResult>`. It (1) picks
+the model via `route()` and (2) checks the response cache keyed on the *existing* prompt
+fingerprint hash — so a lookup is one keyed read, never an embedding call, and adds no
+latency. Everything **fails open**: a cache/config error degrades to a normal call on the
+original model. `storeCache(key, value)` saves a fresh response fire-and-forget.
+
+- `src/router.ts` — pure, synchronous `route(policy, req)`. `"auto"` downshifts cheap,
+  tool-free calls (`estimateTokens < AUTO_MAX_TOKENS && toolCount === 0`) via `AUTO_DOWNSHIFT`;
+  explicit `RoutePolicy` is a priority-sorted rule list (`token_estimate` / `tool_count`).
+  Returns the original model when nothing matches — always safe to leave on.
+- `src/cache.ts` — exact-match store. `createCacheStore(opts, ctx?)` → memory `Map`+TTL,
+  Upstash (HTTP REST via `fetch`), Redis (`ioredis`, lazy-imported optional dep), or
+  **`managed`** (proxies get/set through the backend's `/v1/cache`, authed by accKey —
+  `ctx` supplies the derived URL via `cacheUrlFrom(endpoint)` + the accKey; our store creds
+  never reach the SDK). Key = `{namespace}:{model}:{fingerprintHash}`. Stores the **raw
+  provider response** — that data lives only in the user's store, never on the telemetry wire.
+
+**Wiring scope: OpenAI adapter only.** `monitor.ts`'s `runOnce` does
+`isBlocked → preCall → (cache hit ? replay : routed call w/ fallback) → record`. Non-streaming
+only; streaming passes through unchanged. The other three adapters (`ai`/`langchain`/`agents`)
+bake the model in at wrap-time and return framework-typed results, so they stay telemetry-only
+for now — `AdvancedOptions` is accepted everywhere but `router`/`cache` are inert there.
+
+**Remote config push.** `kill.ts`'s `KillSwitch` now parses `{ status, config }` from
+`/status` in one cached fetch (`getConfig()` alongside `isKilled()`). `Sink.preCall` prefers a
+backend-pushed `config.routing` / `config.cache` over the local `router` / `cache` option —
+this is how dashboard auto-remediation's `downshift` action and the dashboard cache backend
+(off / managed / BYODB) reach the SDK with **zero new polling**. `effectiveCache()` memoizes
+built stores by config signature; `config.cache` for BYODB carries the decrypted token (the
+backend decrypts it only in the `/status` handler before pushing to that agent's own SDK).
+
+`AdvancedOptions extends MonitorOptions` with `router?` / `cache?`; `withCostControl(client,
+{agentId,accKey})` is unchanged. `TelemetryEvent` gained optional `routing` / `cache` /
+`sdk_features`. New public exports: `route`, `estimateTokens`, `cacheKey`, plus the
+`RoutePolicy` / `CacheOptions` / `AdvancedOptions` / `RemoteConfig` types.
+
+## Outcome channel (cost per successful completion)
+
+`src/outcome.ts` — `reportOutcome(outcome, { agentId, accKey, endpoint?, workflow? })` where
+`outcome` is `"success" | "failure" | "rework"`. It POSTs `{ outcomes: [...] }` to a derived
+`…/outcomes` URL (`outcomesUrlFrom`, mirrors `cacheUrlFrom`) with the Bearer accKey and
+**fails open** (swallows transport errors). It is a **standalone, stateless function** on
+purpose: the wrapped client/model keeps its framework-native return type (Key Rule 3), so
+there's no per-call handle to attach an outcome to, and the outcome is judged *after* the
+response. Works identically across all four adapters with zero adapter changes. Content-free
+— only the enum + an optional caller-supplied workflow **label**, never prompt/response text
+(Key Rule 1). Exported as `reportOutcome` / `outcomesUrlFrom` + `Outcome` /
+`ReportOutcomeOptions` types. Backend: ingest at `frontend/app/api/v1/outcomes`, stored in
+the separate `outcome_logs` table; the dashboard divides spend by successful completions.
+
 `src/telemetry.ts` (`TelemetryQueue`) buffers events, flushes on `batchSize` or a `setInterval` (`unref`'d so it never holds the process open), and POSTs `{ events }` with a Bearer header via native `fetch`. All dispatch errors route to `onError` — never thrown into the caller's path. `monitor.ts` registers a one-time `beforeExit` flush.
 
 `src/pricing.ts` is `calculateCost` over the `PRICING` table from consts. An unknown model falls back to a deliberately high conservative rate (`FALLBACK_RATE`, ≈ gpt-4) and warns via `onError` — **never `0`**, so budgets still trip for un-priced/new models. Never throws.

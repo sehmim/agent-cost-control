@@ -1,6 +1,6 @@
 {
   "name": "agent-cost-controller",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Wrap your OpenAI, Vercel AI SDK, Mastra, LangChain, or OpenAI Agents calls to track token usage and cost. Never touches keys, prompts, or completions.",
   "type": "module",
   "main": "./dist/index.cjs",
