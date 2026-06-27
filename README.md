@@ -1,39 +1,23 @@
 <div align="center">
 
-<pre>
-                    .-"""""""-.
-                 .-'  .     .  '-.
-               .'   .---. .---.   '.
-              /    / o   |   o \    \
-             |    |   .--'--.   |    |
-             |     '--'     '--'     |
-             |    .-"""""""""""-.    |
-             |   / \/\/\/\/\/\/\ \   |
-              \ |  C H O M P !!!  | /
-               \ \ /\/\/\/\/\/\/ / /
-                '.'-.._______..-'.'
-                  '-.   \   /  .-'
-                     \   \ /  /
-            ~~vine~~  \   |  /  ~~vine~~
-                  .----'--+--'----.
-                   \    A C C     /
-                    \____ 67 ____/
-                     '-----------'
-</pre>
-
 # 🌱 Agent Cost Controller
 
-**Integrate once, then forget it.** Wrap your existing LLM client in a single line and
-Agent Cost Controller automatically meters every call — tokens, cost, latency, prompt
-shape, and tool usage — and streams it to a live dashboard. No rewrites, no per-call
-instrumentation.
+**Drop-in middleware that cuts your agent's token bill on autopilot.** Wrap your LLM
+client in one line — then forget it. Agent Cost Controller meters every call _and acts on
+the waste for you_: routes easy calls to cheaper models, replays repeat responses from
+cache, and auto-stops runaway agents before they torch your budget. You ship; it saves.
 
-From there it becomes a control plane: set **budgets** and **hard call caps**, **auto-stop**
-runaway agents, surface **loops and prompt bloat**, **route** cheap calls to cheaper models,
-and **cache** repeat responses in your own database — all without touching your code again.
+Stop building your own cost-optimization layer. This **is** the control plane you'd
+otherwise hand-roll — budgets, hard caps, kill switch, loop/bloat detection, model routing,
+response caching (your DB or ours), and cost-per-success analytics — every lever flipped
+from a dashboard, **never from your code**. Integrate once; tune it for life without a redeploy.
 
-It never sees your API keys, prompts, or completions, and never adds latency to a call.
+Never sees your API keys, prompts, or completions. Never adds latency to a call.
 
+**[See the site →](https://agent-cost-controller.vercel.app/agent-cost-controller)** · **[Open the live dashboard →](https://agent-cost-controller.vercel.app)**
+
+[![Website](https://img.shields.io/badge/Website-agent--cost--controller-2e8b57)](https://agent-cost-controller.vercel.app/agent-cost-controller)
+[![Dashboard](https://img.shields.io/badge/Dashboard-live-2e8b57)](https://agent-cost-controller.vercel.app)
 [![npm version](https://img.shields.io/npm/v/agent-cost-controller.svg?color=2e8b57&label=npm)](https://www.npmjs.com/package/agent-cost-controller)
 [![node](https://img.shields.io/node/v/agent-cost-controller.svg?color=2e8b57)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/agent-cost-controller.svg?color=2e8b57)](./LICENSE)
@@ -43,20 +27,27 @@ It never sees your API keys, prompts, or completions, and never adds latency to 
 
 ---
 
-## 🌿 Capabilities
+## 🌿 Why it matters
 
-| | |
+Agent token cost is an **operating discipline**, not a prompt-trimming chore. The goal
+isn't "fewer tokens" — it's the lowest **cost per successful completion** with reliability,
+governance, and an audit trail intact. Agent Cost Controller turns the practical levers
+(routing, caching, enforcement) into a board-operable model.
+
+| Benefit | What you get |
 | --- | --- |
-| 🪴 **Integrate &amp; forget** | One-line wrap — `withCostControl(client, opts)` — keeps the same methods, types, and return values. Every call after that is metered automatically and reported to the dashboard. |
-| 📊 **Automatic monitoring** | Per-call tokens, cost, latency, model, a content-free prompt fingerprint, tool **names**, and an output hash — attributed per agent, no manual logging. |
-| 🔒 **Privacy-first** | Ships only the `usage` object plus content-free metadata. Raw prompts, completions, and API keys never leave the process. |
-| ⚡ **Zero latency** | Telemetry is read **after** the response and flushed fire-and-forget. Never blocks, never throws into your request path. |
-| 🦷 **Budgets &amp; auto-stop** | Set a spend budget or hard call cap in the dashboard; the kill switch halts a runaway agent mid-loop — `AgentKilledError` (or a graceful fallback) instead of another expensive call. |
-| 🔁 **Waste detection** | Loops, prompt bloat, call spikes, and stuck retries are detected from the fingerprint stream and surfaced as dashboard alerts with estimated savings. |
-| 💸 **Model routing** | Optionally downshift cheap, simple calls to a cheaper model — automatically, or by an explicit policy. |
-| 🗄️ **Response cache (BYO DB)** | Replay identical requests for $0 from memory, your own Redis/Upstash, or a hosted store — configurable per agent from the dashboard. |
-| 📈 **Cost per success** | `reportOutcome()` marks a completion `success`/`failure`/`rework` so the dashboard tracks **cost ÷ successful completions**, not just raw tokens. |
-| 🌎 **Framework-agnostic** | OpenAI · Vercel AI SDK · Mastra · LangChain.js / LangGraph.js · OpenAI Agents SDK — one shared, privacy-safe pipeline. |
+| 🎯 **Optimize cost per *successful* completion** | The board metric, not raw tokens: spend ÷ successful completions, tracked **by workflow**. `reportOutcome("success"\|"failure"\|"rework")` feeds it; the **board dashboard** turns it into unit economics. Cheap answers that cause rework/escalation don't count as savings. |
+| 🔀 **Routing & cascading** | Send low-difficulty work to cheaper models, keep strong models for the hard calls — auto-heuristic or explicit policy, set from the dashboard and pushed to the SDK live. |
+| ♻️ **Response caching — built-in + BYODB** | Replay identical requests for **$0** from memory, the hosted store (storage-capped), or your own Redis/Upstash. Keyed on a content-free fingerprint, **zero added latency**, fails open. |
+| 🦷 **Enforcement, not just dashboards** | Budgets + auto-stop, call/tool caps, and a one-click **kill switch** actually *stop* a runaway agent mid-loop (`AgentKilledError` or a graceful fallback). Visibility tools only watch. |
+| 🤖 **Auto-remediation control plane** | Policies act on waste signals automatically — **downshift or kill on threshold**, with cooldowns and a full **audit log** of every action. |
+| 📊 **Board dashboard** | A monthly **Cost / Quality / Danger** view: cost per success, cache hit rate, escalation & rework rates, policy blocks, and incidents. |
+| 🔒 **Private & governed by design** | No prompts, completions, or API keys ever leave your process — only the `usage` object + content-free metadata (fingerprint, tool **names**, output hash). Per-owner isolation + audit evidence. |
+| ⚡ **One line, any framework, zero latency** | `withCostControl(client, opts)` — same methods, types, and return values. OpenAI · Vercel AI SDK · Mastra · LangChain / LangGraph · OpenAI Agents, one shared pipeline. Telemetry is post-response, fire-and-forget. |
+
+> **On caching scope:** today's cache is **exact-match** (same prompt + model). Embedding-based
+> **semantic** caching, prefix-segment caching, and lazy tool-loading are on the roadmap — not
+> claimed as shipped. Routing is heuristic/policy-based, not yet risk-tiered.
 
 ## 🪴 Install
 
