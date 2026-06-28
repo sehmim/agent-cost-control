@@ -69,6 +69,14 @@ only the one you use and import from the matching subpath:
 
 All adapters feed the **same** privacy-safe pipeline, so the guarantees above hold everywhere.
 
+## 🔑 Get an API key
+
+1. Go to **[agent-cost-controller.vercel.app](https://agent-cost-controller.vercel.app)** and sign in.
+2. Navigate to **API Keys** in the sidebar.
+3. Create a key — it starts with `acc_`. Use this as `accKey` in all adapters.
+
+> Your `agentId` is any string you choose to identify the agent (e.g. `"support-bot"`). The same key can be shared across multiple agents.
+
 ## 🌍 Frameworks
 
 The same `agentId` / `accKey` / kill-switch options apply to every adapter below.
